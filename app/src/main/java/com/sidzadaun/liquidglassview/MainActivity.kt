@@ -1,549 +1,200 @@
-package com.sidzadaun.liquidglassview
-
-import android.app.role.RoleManager
-import android.content.Context
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.net.Uri
-import android.os.Build
-import android.os.Bundle
-import android.provider.Settings
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Apps
-import androidx.compose.material.icons.filled.BatteryFull
-import androidx.compose.material.icons.filled.Bluetooth
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.DarkMode
-import androidx.compose.material.icons.filled.FlashlightOff
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Wifi
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
-import androidx.core.graphics.drawable.toBitmap
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-
-private val Bg = Color(0xFF080B12)
-private val Glass = Color.White.copy(alpha = 0.105f)
-private val GlassStrong = Color.White.copy(alpha = 0.17f)
-private val Stroke = Color.White.copy(alpha = 0.20f)
-private val TextPrimary = Color.White
-private val TextSecondary = Color.White.copy(alpha = 0.64f)
-
-class MainActivity : ComponentActivity() {
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-
-        setContent {
-            GlassLauncherTheme {
-                GlassLauncherScreen()
-            }
-        }
-
-        requestHomeRole()
-    }
-
-    private fun requestHomeRole() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val roleManager = getSystemService(RoleManager::class.java)
-            if (roleManager != null &&
-                roleManager.isRoleAvailable(RoleManager.ROLE_HOME) &&
-                !roleManager.isRoleHeld(RoleManager.ROLE_HOME)
-            ) {
-                startActivityForResult(
-                    roleManager.createRequestRoleIntent(RoleManager.ROLE_HOME),
-                    900
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun GlassLauncherScreen() {
-    val context = LocalContext.current
-    var apps by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
-    var search by remember { mutableStateOf("") }
-    var drawer by remember { mutableStateOf(false) }
-    var sidebar by remember { mutableStateOf(false) }
-
-    LaunchedEffect(Unit) {
-        apps = withContext(Dispatchers.IO) {
-            loadApps(context)
-        }
-    }
-
-    val filtered = remember(apps, search) {
-        if (search.isBlank()) apps
-        else apps.filter { it.label.contains(search, ignoreCase = true) }
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(Color(0xFF111827), Bg, Color(0xFF05070B))
-                )
-            )
-            .pointerInput(Unit) {
-                detectHorizontalDragGestures(
-                    onHorizontalDrag = { _, drag ->
-                        if (drag < -45) sidebar = true
-                        if (drag > 45) sidebar = false
-                    }
-                )
-            }
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(top = 26.dp, start = 18.dp, end = 18.dp, bottom = 12.dp)
-        ) {
-            Header(
-                onSearch = { drawer = true },
-                onSettings = {
-                    context.startActivity(Intent(Settings.ACTION_SETTINGS))
-                }
-            )
-
-            Spacer(Modifier.height(22.dp))
-
-            if (!drawer) {
-                HomeContent(
-                    apps = apps.take(12),
-                    onApp = { launchApp(context, it.packageName) }
-                )
-            } else {
-                AppDrawer(
-                    apps = filtered,
-                    search = search,
-                    onSearchChange = { search = it },
-                    onApp = { launchApp(context, it.packageName) },
-                    onClose = {
-                        drawer = false
-                        search = ""
-                    }
-                )
-            }
-
-            Spacer(Modifier.weight(1f))
-
-            GlassDock(
-                apps = apps.take(5),
-                onApp = { launchApp(context, it.packageName) },
-                onDrawer = { drawer = true },
-                onSidebar = { sidebar = !sidebar }
-            )
-        }
-
-        AnimatedVisibility(
-            visible = sidebar,
-            modifier = Modifier.align(Alignment.CenterEnd)
-        ) {
-            Sidebar(
-                onClose = { sidebar = false },
-                onSettings = {
-                    context.startActivity(Intent(Settings.ACTION_SETTINGS))
-                },
-                onWifi = {
-                    context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
-                },
-                onBluetooth = {
-                    context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
-                },
-                onBattery = {
-                    context.startActivity(Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS))
-                },
-                onOverlay = {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
-                        !Settings.canDrawOverlays(context)
-                    ) {
-                        val intent = Intent(
-                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                            Uri.parse("package:\${context.packageName}")
-                        )
-                        context.startActivity(intent)
-                    } else {
-                        ContextCompat.startForegroundService(
-                            context,
-                            Intent(context, GlassOverlayService::class.java)
-                        )
-                    }
-                }
-            )
-        }
-    }
-}
-
-@Composable
-private fun Header(onSearch: () -> Unit, onSettings: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                "GLASS",
-                color = TextPrimary,
-                fontSize = 26.sp,
-                fontWeight = FontWeight.Light,
-                letterSpacing = 5.sp
-            )
-            Text(
-                "launcher",
-                color = TextSecondary,
-                fontSize = 12.sp,
-                letterSpacing = 2.sp
-            )
-        }
-
-        GlassCircleButton(Icons.Default.Search, onSearch)
-        Spacer(Modifier.width(8.dp))
-        GlassCircleButton(Icons.Default.Settings, onSettings)
-    }
-}
-
-@Composable
-private fun HomeContent(apps: List<AppInfo>, onApp: (AppInfo) -> Unit) {
-    Column {
-        Text(
-            "YOUR APPS",
-            color = TextSecondary,
-            fontSize = 11.sp,
-            letterSpacing = 2.sp
-        )
-
-        Spacer(Modifier.height(12.dp))
-
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(4),
-            modifier = Modifier.fillMaxWidth(),
-            userScrollEnabled = false,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(apps) { app ->
-                GlassAppTile(app, onApp)
-            }
-        }
-    }
-}
-
-@Composable
-private fun AppDrawer(
-    apps: List<AppInfo>,
-    search: String,
-    onSearchChange: (String) -> Unit,
-    onApp: (AppInfo) -> Unit,
-    onClose: () -> Unit
-) {
-    Column(Modifier.fillMaxSize()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = search,
-                onValueChange = onSearchChange,
-                modifier = Modifier.weight(1f),
-                singleLine = true,
-                placeholder = { Text("Search apps", color = TextSecondary) },
-                leadingIcon = { Icon(Icons.Default.Search, null) },
-                shape = RoundedCornerShape(22.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = Glass,
-                    unfocusedContainerColor = Glass,
-                    focusedBorderColor = Stroke,
-                    unfocusedBorderColor = Stroke,
-                    focusedTextColor = TextPrimary,
-                    unfocusedTextColor = TextPrimary
-                )
-            )
-            Spacer(Modifier.width(8.dp))
-            GlassCircleButton(Icons.Default.Close, onClose)
-        }
-
-        Spacer(Modifier.height(14.dp))
-
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(4),
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 90.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(apps) { app ->
-                GlassAppTile(app, onApp)
-            }
-        }
-    }
-}
-
-@Composable
-private fun GlassAppTile(app: AppInfo, onApp: (AppInfo) -> Unit) {
-    val bitmap = remember(app.packageName) {
-        app.icon.toBitmap(96, 96).asImageBitmap()
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onApp(app) }
-            .padding(3.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Box(
-            modifier = Modifier
-                .size(62.dp)
-                .clip(RoundedCornerShape(19.dp))
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            Color.White.copy(alpha = .19f),
-                            Color.White.copy(alpha = .055f)
-                        )
-                    )
-                )
-                .border(1.dp, Stroke, RoundedCornerShape(19.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            androidx.compose.foundation.Image(
-                bitmap = bitmap,
-                contentDescription = app.label,
-                modifier = Modifier.size(43.dp)
-            )
-        }
-
-        Spacer(Modifier.height(5.dp))
-
-        Text(
-            app.label,
-            color = TextPrimary.copy(alpha = .88f),
-            fontSize = 10.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
-
-@Composable
-private fun GlassDock(
-    apps: List<AppInfo>,
-    onApp: (AppInfo) -> Unit,
-    onDrawer: () -> Unit,
-    onSidebar: () -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Row(
-            modifier = Modifier
-                .clip(RoundedCornerShape(27.dp))
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            Color.White.copy(alpha = .18f),
-                            Color.White.copy(alpha = .075f)
-                        )
-                    )
-                )
-                .border(1.dp, Color.White.copy(alpha = .25f), RoundedCornerShape(27.dp))
-                .padding(horizontal = 10.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(9.dp)
-        ) {
-            apps.forEach { app ->
-                val bitmap = remember(app.packageName) {
-                    app.icon.toBitmap(72, 72).asImageBitmap()
-                }
-                androidx.compose.foundation.Image(
-                    bitmap = bitmap,
-                    contentDescription = app.label,
-                    modifier = Modifier
-                        .size(45.dp)
-                        .clip(RoundedCornerShape(13.dp))
-                        .clickable { onApp(app) }
-                )
-            }
-
-            Icon(
-                Icons.Default.Apps,
-                contentDescription = "Apps",
-                tint = TextPrimary,
-                modifier = Modifier
-                    .size(45.dp)
-                    .clip(RoundedCornerShape(13.dp))
-                    .background(GlassStrong)
-                    .clickable { onDrawer() }
-                    .padding(10.dp)
-            )
-        }
-
-        Spacer(Modifier.width(8.dp))
-
-        GlassCircleButton(Icons.Default.DarkMode, onSidebar)
-    }
-}
-
-@Composable
-private fun Sidebar(
-    onClose: () -> Unit,
-    onSettings: () -> Unit,
-    onWifi: () -> Unit,
-    onBluetooth: () -> Unit,
-    onBattery: () -> Unit,
-    onOverlay: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .padding(end = 12.dp)
-            .width(255.dp)
-            .clip(RoundedCornerShape(30.dp))
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        Color.White.copy(alpha = .22f),
-                        Color.White.copy(alpha = .09f)
-                    )
-                )
-            )
-            .border(1.dp, Color.White.copy(alpha = .28f), RoundedCornerShape(30.dp))
-            .padding(18.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "QUICK GLASS",
-                color = TextPrimary,
-                fontSize = 14.sp,
-                letterSpacing = 2.sp,
-                modifier = Modifier.weight(1f)
-            )
-            Icon(
-                Icons.Default.Close,
-                contentDescription = "Close",
-                tint = TextPrimary,
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .clickable { onClose() }
-                    .padding(6.dp)
-            )
-        }
-
-        Spacer(Modifier.height(18.dp))
-
-        QuickAction(Icons.Default.Wifi, "Wi-Fi", onWifi)
-        QuickAction(Icons.Default.Bluetooth, "Bluetooth", onBluetooth)
-        QuickAction(Icons.Default.BatteryFull, "Battery", onBattery)
-        QuickAction(Icons.Default.FlashlightOff, "Overlay", onOverlay)
-        QuickAction(Icons.Default.Settings, "Settings", onSettings)
-    }
-}
-
-@Composable
-private fun QuickAction(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color.White.copy(alpha = .07f))
-            .clickable { onClick() }
-            .padding(13.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(icon, null, tint = TextPrimary)
-        Spacer(Modifier.width(13.dp))
-        Text(label, color = TextPrimary, fontSize = 14.sp)
-    }
-    Spacer(Modifier.height(8.dp))
-}
-
-@Composable
-private fun GlassCircleButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    onClick: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .size(42.dp)
-            .clip(CircleShape)
-            .background(Glass)
-            .border(1.dp, Stroke, CircleShape)
-            .clickable { onClick() },
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(icon, null, tint = TextPrimary, modifier = Modifier.size(20.dp))
-    }
-}
-
-private fun loadApps(context: Context): List<AppInfo> {
-    val pm = context.packageManager
-    val intent = Intent(Intent.ACTION_MAIN).apply {
-        addCategory(Intent.CATEGORY_LAUNCHER)
-    }
-
-    return pm.queryIntentActivities(intent, PackageManager.MATCH_ALL)
-        .asSequence()
-        .filter { it.activityInfo.packageName != context.packageName }
-        .map {
-            AppInfo(
-                packageName = it.activityInfo.packageName,
-                label = it.loadLabel(pm).toString(),
-                icon = it.loadIcon(pm)
-            )
-        }
-        .distinctBy { it.packageName }
-        .sortedBy { it.label.lowercase() }
-        .toList()
-}
-
-private fun launchApp(context: Context, packageName: String) {
-    val intent = context.packageManager.getLaunchIntentForPackage(packageName)
-    intent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    if (intent != null) context.startActivity(intent)
-}
-
-@Composable
-private fun GlassLauncherTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = darkColorScheme(
-            background = Bg,
-            surface = Bg,
-            primary = Color.White,
-            onPrimary = Color.Black,
-            onBackground = TextPrimary,
-            onSurface = TextPrimary
-        ),
-        content = content
-    )
-}
+ (cd "$(git rev-parse --show-toplevel)" && printf '%s' 'diff --git a/app/src/main/AndroidManifest.xml b/app/src/main/AndroidManifest.xml
+index 34695b1f9f234311ef79f56ba5433151c67dc2e6..8fe5470c313ec7d810ac89d0a87b241c78e9a623 100644
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -1,33 +1,33 @@
+ <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+ 
+     <application
+         android:allowBackup="true"
+         android:label="Glass Launcher"
+-        android:theme="@style/Theme.GlassLauncher">
++        android:theme="@android:style/Theme.Material.NoActionBar">
+         <activity
+             android:name=".MainActivity"
+             android:exported="true">
+             <intent-filter>
+                 <action android:name="android.intent.action.MAIN" />
+                 <category android:name="android.intent.category.LAUNCHER" />
+             </intent-filter>
+             <intent-filter>
+                 <action android:name="android.intent.action.MAIN" />
+                 <category android:name="android.intent.category.HOME" />
+                 <category android:name="android.intent.category.DEFAULT" />
+             </intent-filter>
+         </activity>
+ 
+         <service
+             android:name=".GlassOverlayService"
+             android:exported="false"
+             android:foregroundServiceType="specialUse">
+             <property
+                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                 android:value="User-requested launcher (cd "$(git rev-parse --show-toplevel)" && printf '%s' 'diff --git a/app/src/main/java/com/sidzadaun/liquidglassview/MainActivity.kt b/app/src/main/java/com/sidzadaun/liquidglassview/MainActivity.kt
+index eda134ea6ac24c671a81a8182b338477836ce402..277314d9d721e41d2d214dadb418498d9567e54e 100644
+--- a/app/src/main/java/com/sidzadaun/liquidglassview/MainActivity.kt
++++ b/app/src/main/java/com/sidzadaun/liquidglassview/MainActivity.kt
+@@ -1,34 +1,38 @@
+ package com.sidzadaun.liquidglassview
+ 
+ import android.app.role.RoleManager
++import android.app.NotificationChannel
++import android.app.NotificationManager
++import android.app.Service
+ import android.content.Context
+ import android.content.Intent
+ import android.content.pm.PackageManager
+ import android.net.Uri
+ import android.os.Build
+ import android.os.Bundle
++import android.os.IBinder
+ import android.provider.Settings
+ import androidx.activity.ComponentActivity
+ import androidx.activity.compose.setContent
+ import androidx.compose.animation.AnimatedVisibility
+ import androidx.compose.foundation.Image
+ import androidx.compose.foundation.background
+ import androidx.compose.foundation.border
+ import androidx.compose.foundation.clickable
+ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+ import androidx.compose.foundation.layout.Arrangement
+ import androidx.compose.foundation.layout.Box
+ import androidx.compose.foundation.layout.Column
+ import androidx.compose.foundation.layout.PaddingValues
+ import androidx.compose.foundation.layout.Row
+ import androidx.compose.foundation.layout.Spacer
+ import androidx.compose.foundation.layout.fillMaxSize
+ import androidx.compose.foundation.layout.fillMaxWidth
+ import androidx.compose.foundation.layout.height
+ import androidx.compose.foundation.layout.padding
+ import androidx.compose.foundation.layout.size
+ import androidx.compose.foundation.layout.width
+ import androidx.compose.foundation.layout.weight
+ import androidx.compose.foundation.lazy.grid.GridCells
+ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+ import androidx.compose.foundation.lazy.grid.items
+@@ -48,50 +52,51 @@ import androidx.compose.material3.Icon
+ import androidx.compose.material3.MaterialTheme
+ import androidx.compose.material3.OutlinedTextField
+ import androidx.compose.material3.OutlinedTextFieldDefaults
+ import androidx.compose.material3.Text
+ import androidx.compose.material3.darkColorScheme
+ import androidx.compose.runtime.Composable
+ import androidx.compose.runtime.LaunchedEffect
+ import androidx.compose.runtime.getValue
+ import androidx.compose.runtime.mutableStateOf
+ import androidx.compose.runtime.remember
+ import androidx.compose.runtime.setValue
+ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
+ import androidx.compose.ui.draw.clip
+ import androidx.compose.ui.graphics.Brush
+ import androidx.compose.ui.graphics.Color
+ import androidx.compose.ui.graphics.asImageBitmap
+ import androidx.compose.ui.graphics.vector.ImageVector
+ import androidx.compose.ui.input.pointer.pointerInput
+ import androidx.compose.ui.platform.LocalContext
+ import androidx.compose.ui.text.font.FontWeight
+ import androidx.compose.ui.text.style.TextOverflow
+ import androidx.compose.ui.unit.dp
+ import androidx.compose.ui.unit.sp
+ import androidx.core.content.ContextCompat
++import androidx.core.app.NotificationCompat
+ import androidx.core.graphics.drawable.toBitmap
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.withContext
+ 
+ private val Bg = Color(0xFF080B12)
+ private val Glass = Color.White.copy(alpha = 0.105f)
+ private val GlassStrong = Color.White.copy(alpha = 0.17f)
+ private val Stroke = Color.White.copy(alpha = 0.20f)
+ private val TextPrimary = Color.White
+ private val TextSecondary = Color.White.copy(alpha = 0.64f)
+ 
+ class MainActivity : ComponentActivity() {
+     override fun onCreate(savedInstanceState: Bundle?) {
+         super.onCreate(savedInstanceState)
+         setContent { GlassLauncherTheme { GlassLauncherScreen() } }
+         requestHomeRole()
+     }
+ 
+     private fun requestHomeRole() {
+         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+ 
+         val roleManager = getSystemService(RoleManager::class.java) ?: return
+         if (roleManager.isRoleAvailable(RoleManager.ROLE_HOME) &&
+             !roleManager.isRoleHeld(RoleManager.ROLE_HOME)
+         ) {
+@@ -306,25 +311,63 @@ private fun launchApp(context: Context, packageName: String) {
+     context.packageManager.getLaunchIntentForPackage(packageName)?.let {
+         context.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+     }
+ }
+ 
+ private fun openSettings(context: Context) = context.startActivity(Intent(Settings.ACTION_SETTINGS))
+ 
+ private fun startOverlayService(context: Context) {
+     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
+         context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}")))
+     } else {
+         ContextCompat.startForegroundService(context, Intent(context, GlassOverlayService::class.java))
+     }
+ }
+ 
+ @Composable
+ private fun GlassLauncherTheme(content: @Composable () -> Unit) {
+     MaterialTheme(
+         colorScheme = darkColorScheme(
+             background = Bg, surface = Bg, primary = Color.White, onPrimary = Color.Black,
+             onBackground = TextPrimary, onSurface = TextPrimary
+         ),
+         content = content
+     )
+ }
++
++private data class AppInfo(
++    val packageName: String,
++    val label: String,
++    val icon: android.graphics.drawable.Drawable
++)
++
++/** Foreground service started after the user grants overlay permission. */
++class GlassOverlayService : Service() {
++    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
++        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
++            val channel = NotificationChannel(
++                CHANNEL_ID,
++                "Glass overlay",
++                NotificationManager.IMPORTANCE_LOW
++            )
++            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
++        }
++
++        startForeground(
++            NOTIFICATION_ID,
++            NotificationCompat.Builder(this, CHANNEL_ID)
++                .setSmallIcon(android.R.drawable.ic_menu_view)
++                .setContentTitle("Glass overlay is active")
++                .setContentText("The launcher overlay service is running.")
++                .setOngoing(true)
++                .build()
++        )
++        return START_NOT_STICKY
++    }
++
++    override fun onBind(intent: Intent?): IBinder? = null
++
++    private companion object {
++        const val CHANNEL_ID = "glass_overlay"
++        const val NOTIFICATION_ID = 1001
++    }
++}
+' | git apply --3way) overlay" />
+         </service>
+     </application>
+ </manifest>
+ 
+' | git apply --3way)
