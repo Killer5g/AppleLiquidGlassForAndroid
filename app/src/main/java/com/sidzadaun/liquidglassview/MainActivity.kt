@@ -1,11 +1,9 @@
 package com.sidzadaun.liquidglassview
 
-import android.app.Activity
 import android.app.role.RoleManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -13,7 +11,6 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -30,7 +27,7 @@ import androidx.compose.material.icons.filled.BatteryFull
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DarkMode
-import androidx.compose.material.icons.filled.FlashlightOn
+import androidx.compose.material.icons.filled.FlashlightOff
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Wifi
@@ -38,7 +35,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -193,7 +189,7 @@ private fun GlassLauncherScreen() {
                     ) {
                         val intent = Intent(
                             Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                            Uri.parse("package:${context.packageName}")
+                            Uri.parse("package:\${context.packageName}")
                         )
                         context.startActivity(intent)
                     } else {
@@ -465,7 +461,7 @@ private fun Sidebar(
         QuickAction(Icons.Default.Wifi, "Wi-Fi", onWifi)
         QuickAction(Icons.Default.Bluetooth, "Bluetooth", onBluetooth)
         QuickAction(Icons.Default.BatteryFull, "Battery", onBattery)
-        QuickAction(Icons.Default.FlashlightOn, "Overlay", onOverlay)
+        QuickAction(Icons.Default.FlashlightOff, "Overlay", onOverlay)
         QuickAction(Icons.Default.Settings, "Settings", onSettings)
     }
 }
